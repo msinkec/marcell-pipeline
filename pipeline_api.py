@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+import shutil
 
 from flask import Flask
 from flask import request, Response
@@ -13,6 +14,8 @@ from stanfordnlp.models.common.conll import CoNLLFile
 
 
 app = Flask(__name__)
+
+meta_fields = ['language', 'date', 'title', 'type', 'entype']
 
 # Load config from env variables
 data_dir = Path(os.environ.get('DATA_DIR'))
@@ -78,7 +81,7 @@ def run_obeliks4J(res_dir, input_name, output_name):
     os.system(command)
     
 
-def run_stanfordnlp(res_dir, input_name, output_name):
+def run_stanfordnlp(res_dir, input_name, output_name, standoff_metadata, docid):
     input_file = res_dir / input_name
     output_file = res_dir / output_name
 
@@ -92,9 +95,32 @@ def run_stanfordnlp(res_dir, input_name, output_name):
     # Start processing.
     res = nlp(doc)
 
+    # Write metadata to input file
+    add_metadata(output_file, standoff_metadata, docid)
+
     # Save result to output CoNLL-U Plus file.
-    with output_file.open('w') as f:
+    with output_file.open('a') as f:
         f.write(res.conll_file.conll_as_string())
+
+
+def add_metadata(file_path, standoff_metadata, docid):
+    with file_path.open('a') as f:
+        f.write('# global.columns = ID FORM LEMMA UPOS XPOS FEATS HEAD DEPREL DEPS MISC\n')
+        f.write('# newdoc id = {}\n'.format(docid))
+
+        for key in meta_fields:
+            if key not in standoff_metadata:
+                cleanup(res_dir)
+                raise InvalidParams('Missing key "{}" in standoff metadata.'.format(key))
+
+            val = standoff_metadata[key]
+            val = val.replace('\n', ' ').replace('\r', '')
+
+            f.write('# {} = {}\n'.format(key, val))
+
+
+def cleanup(res_dir):
+    shutil.rmtree(res_dir)
 
 
 @app.route('/annotate', methods=['POST'])
@@ -126,21 +152,23 @@ def run_pipeline():
 
     # Save input text to file
     input_file = res_dir / input_name
-    with input_file.open('w') as f:
+    with input_file.open('a') as f:
         f.write(text)
 
     # Run Obeliks4J for tokenization
     run_obeliks4J(res_dir, input_name, obeliks_outname)
 
     # Run StanfordNLP pipeline on Obeliks4J output
-    run_stanfordnlp(res_dir, obeliks_outname, result_name)
+    run_stanfordnlp(res_dir, obeliks_outname, result_name, standoff_metadata, docid)
 
-    # Stream the results because they may be quite large
+    # Stream the result file because it may be quite large
     result_file = res_dir / result_name
     def generate_res():
         with result_file.open('r') as f:
             for row in f:
                 yield row
+        # Clean up files when done streaming
+        cleanup(res_dir)
     return Response(generate_res(), status=200)
 
 

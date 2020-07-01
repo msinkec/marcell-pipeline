@@ -20,4 +20,4 @@ WORKDIR /pipeline
 COPY pipeline_api.py wsgi.py /pipeline/
 
 # TODO: Fix preloading. For now every worker loads its seperate models in memory.
-CMD ["gunicorn", "--bind", "0.0.0.0:80", "-w", "2", "--access-logfile", "-",  "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:80", "-w", "1", "--timeout", "1800", "--access-logfile", "-",  "wsgi:app"]
